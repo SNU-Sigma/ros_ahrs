@@ -4,7 +4,7 @@
 #include "I2Cdev.h"
 #include "MPU6050.h"
 #include "HMC5883L.h"
-#include <MadgwickAHRS.h>
+#include "MadgwickAHRS.h"
 #include "geometry_msgs/Quaternion.h"
 
 ros::NodeHandle nh;
