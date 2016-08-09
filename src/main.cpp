@@ -7,27 +7,32 @@
 #include "MadgwickAHRS.h"
 #include "geometry_msgs/Quaternion.h"
 
+#define USE_HMC5883L
+
 ros::NodeHandle nh;
 geometry_msgs::Quaternion imu_msg;
 ros::Publisher p("/imu/Quaternion",&imu_msg);
 
 Madgwick filter;
 MPU6050 mpu;
-HMC5883L hmc;
 unsigned long microsPerReading, microsPrevious, loop_cnt;
 float accelScale, gyroScale;
 
 int aix, aiy, aiz;
 int gix, giy, giz;
-int16_t mix, miy, miz;
 float ax, ay, az;
 float gx, gy, gz;
-float mx, my, mz;
 unsigned long microsNow;
 
 int gix_offset = 0;
 int giy_offset = 0;
 int giz_offset = 0;
+
+#ifdef USE_HMC5883L
+HMC5883L hmc;
+int16_t mix, miy, miz;
+float mx, my, mz;
+#endif
 
 float convertRawAcceleration(int aRaw);
 float convertRawGyro(int gRaw);
@@ -41,15 +46,19 @@ void setup() {
 
   nh.spinOnce();
   // start the IMU and filter
-  filter.begin(200);
+  filter.begin(150);
   mpu.initialize();
-  hmc.initialize();
   mpu.setFullScaleGyroRange(MPU6050_GYRO_FS_1000);
+
+
+  #ifdef USE_HMC5883L
+  hmc.initialize();
   hmc.setSampleAveraging(HMC5883L_AVERAGING_1);
   hmc.setDataRate(HMC5883L_RATE_75);
+  #endif
 
   // // initialize variables to pace updates to correct rate
-  microsPerReading = 1000000 / 200;
+  microsPerReading = 1000000 / 150;
   microsPrevious = micros();
 
 
@@ -63,30 +72,35 @@ void setup() {
 }
 
 void loop() {
-  // check if it's time to read data and update the filter
   microsNow = micros();
   if (microsNow - microsPrevious >= microsPerReading) {
 
-    // read raw data from CurieIMU
     mpu.getMotion6(&aix, &aiy, &aiz, &gix, &giy, &giz);
 
     // convert from raw data to gravity and degrees/second units
-    ax = convertRawAcceleration(aix);
-    ay = convertRawAcceleration(aiy);
+    ax = -convertRawAcceleration(aix);
+    ay = -convertRawAcceleration(aiy);
     az = convertRawAcceleration(aiz);
-    gx = convertRawGyro(gix-gix_offset);
-    gy = convertRawGyro(giy-giy_offset);
-    gz = convertRawGyro(giz-giz_offset);
+    gx = -convertRawGyro(gix-gix_offset);
+    gy = -convertRawGyro(giy-giy_offset);
+    gz = -convertRawGyro(giz-giz_offset);
 
-    if(loop_cnt%4 == 0){
+    #ifdef USE_HMC5883L
+    if(loop_cnt%3 == 0){
       hmc.getHeading(&mix, &miy, &miz);
       mx = (float)miy;
       my = -(float)mix;
       mz = (float)miz;
     }
+    #endif
 
+    #ifdef USE_HMC5883L
     // update the filter, which computes orientation
+    filter.updateIMU(gx, gy, gz, ax, ay, az);
+    #endif
+    #ifndef USE_HMC5883L
     filter.update(gx, gy, gz, ax, ay, az, mx, my, mz);
+    #endif
 
     filter.getQuaternions(imu_msg.w, imu_msg.x, imu_msg.y, imu_msg.z);
 
